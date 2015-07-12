@@ -1,9 +1,11 @@
 local socket = require "socket"
 local proto = require "proto"
-local time = require "time"
+local timesync = require "timesync"
+
+local IP = "127.0.0.1"
 
 local fd = assert(socket.login {
-	host = "127.0.0.1",
+	host = IP,
 	port = 8001,
 	server = "sample",
 	user = "hello",
@@ -11,7 +13,7 @@ local fd = assert(socket.login {
 })
 
 
-fd:connect("127.0.0.1", 8888)
+fd:connect(IP, 8888)
 
 local function request(fd, type, obj, cb)
 	local data, tag = proto.request(type, obj)
@@ -40,15 +42,21 @@ request(fd, "join", { room = 1 } , function(obj)
 	udp:sync()
 end)
 
-for i=1,200 do
-	time.sleep(1)
-	if i==10 then
-		udp:send "Hello"
+for i=1,1000 do
+	timesync.sleep(1)
+	if (i == 100 or i == 200 or i ==300 or i == 600) and udp then
+		local gtime = timesync.globaltime()
+		if gtime then
+			print("send time", gtime)
+			udp:send ("Hello" .. i .. ":1")
+			udp:send ("Hello" .. i .. ":2")
+			udp:send ("Hello" .. i .. ":3")
+		end
 	end
 	if udp then
-		local time, lag, etime, data = udp:recv()
+		local time, session, data = udp:recv()
 		if time then
-			print("UDP", time, lag, etime, data)
+			print("UDP", "time=", time, "session =", session, "data=", data)
 		end
 	end
 	dispatch(fd)

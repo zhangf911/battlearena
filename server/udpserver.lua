@@ -10,9 +10,9 @@ local timeout = 10 * 60 * 100	-- 10 mins
 
 --[[
 	8 bytes hmac   crypt.hmac_hash(key, session .. data)
+	4 bytes localtime
+	4 bytes eventtime		-- if event time is ff ff ff ff , time sync
 	4 bytes session
-	4 bytes time
-	2 bytes lag		-- if lag is ff ff , time sync
 	padding data
 ]]
 
@@ -24,6 +24,7 @@ function response.register(service, key)
 		room = snax.bind(service, "room"),
 		address = nil,
 		time = skynet.now(),
+		lastevent = nil,
 	}
 	return SESSION
 end
@@ -41,14 +42,14 @@ function accept.post(session, data)
 	end
 end
 
-local function timesync(session, time, from)
-	-- return session .. servertime .. ff ff .. time
+local function timesync(session, localtime, from)
+	-- return globaltime .. localtime .. eventtime .. session , eventtime = 0xffffffff
 	local now = skynet.now()
-	socket.sendto(U, from, string.pack("<IIHI", session, now, 0xffff, time))
+	socket.sendto(U, from, string.pack("<IIII", now, localtime, 0xffffffff, session))
 end
 
 local function udpdispatch(str, from)
-	local session, time, lag = string.unpack("<IIH", str, 9)
+	local localtime, eventtime, session = string.unpack("<III", str, 9)
 	local s = S[session]
 	if s then
 		if s.address ~= from then
@@ -58,15 +59,22 @@ local function udpdispatch(str, from)
 			end
 			s.address = from
 		end
-		if lag == 0xffff then
-			return timesync(session, time, from)
+		if eventtime == 0xffffffff then
+			return timesync(session, localtime, from)
 		end
 		s.time = skynet.now()
 		-- NOTICE: after 497 days, the time will rewind
-		if s.time > time + timeout then
-			snax.printf("The package is delay %f sec", (s.time - lag)/100)
+		if s.time > eventtime + timeout then
+			snax.printf("The package is delay %f sec", (s.time - eventtime)/100)
+			return
+		elseif eventtime > s.time then
+			-- drop this package, and force time sync
+			return timesync(session, localtime, from)
+		elseif s.lastevent and eventtime < s.lastevent then
+			-- drop older event
 			return
 		end
+		s.lastevent = eventtime
 		s.room.post.update(str:sub(9))
 	else
 		snax.printf("Invalid session %d from %s" , session, socket.udp_address(from))

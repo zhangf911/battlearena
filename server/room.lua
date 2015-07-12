@@ -6,32 +6,18 @@ local roomid
 local gate
 local users = {}
 
+--[[
+	4 bytes localtime
+	4 bytes eventtime		-- if event time is ff ff ff ff , time sync
+	4 bytes session
+	padding data
+]]
+
 function accept.update(data)
-	-- session(dword) time(dword) lag(word)
-	local now = skynet.now()
-	local session, time, lag = string.unpack("<IIH", data)
-	local diff = time + lag - now
-	if diff ~= 0 then
-		if diff > 0 then
-			if diff <= lag then
-				lag = lag - diff
-			else
-				lag = 0
-			end
-		else
-			if -diff > lag then
-				lag = lag * 2
-			else
-				lag = lag - diff
-			end
-		end
-		time = now - lag
-		data = string.pack("<IIH", session, time, lag) .. data:sub(11)
-	end
+	local time = skynet.now()
+	data = string.pack("<I", time) .. data
 	for s,v in pairs(users) do
---		if s~=session then
-			gate.post.post(s, data)
---		end
+		gate.post.post(s, data)
 	end
 end
 
